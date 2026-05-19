@@ -289,7 +289,18 @@ _OPENROUTER_MODEL = "google/gemini-3-flash-preview"
 _NOUS_MODEL = "google/gemini-3-flash-preview"
 _NOUS_DEFAULT_BASE_URL = "https://inference-api.nousresearch.com/v1"
 _ANTHROPIC_DEFAULT_BASE_URL = "https://api.anthropic.com"
-_AUTH_JSON_PATH = get_hermes_home() / "auth.json"
+# Phase 0-A (multitenant runtime): lazy via __getattr__ for external access;
+# internal usages below call get_hermes_home() directly at call time.
+
+_LAZY_ATTRS: dict[str, Any] = {
+    "_AUTH_JSON_PATH": lambda: get_hermes_home() / "auth.json",
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY_ATTRS:
+        return _LAZY_ATTRS[name]()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # Codex OAuth endpoint used when a caller explicitly requests
 # provider="openai-codex".  There is deliberately no hardcoded default
@@ -965,9 +976,10 @@ def _read_nous_auth() -> Optional[dict]:
         }
 
     try:
-        if not _AUTH_JSON_PATH.is_file():
+        _auth_json_path = get_hermes_home() / "auth.json"
+        if not _auth_json_path.is_file():
             return None
-        data = json.loads(_AUTH_JSON_PATH.read_text())
+        data = json.loads(_auth_json_path.read_text())
         if data.get("active_provider") != "nous":
             return None
         provider = data.get("providers", {}).get("nous", {})

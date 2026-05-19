@@ -31,7 +31,20 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-DEFAULT_DB_PATH = get_hermes_home() / "state.db"
+# Phase 0-A (multitenant runtime): module-level constants frozen at import time
+# cause cross-tenant leak when HERMES_HOME changes per request via ContextVar.
+# __getattr__ resolves DEFAULT_DB_PATH lazily on each attribute access.
+
+_LAZY_ATTRS: dict[str, Any] = {
+    "DEFAULT_DB_PATH": lambda: get_hermes_home() / "state.db",
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY_ATTRS:
+        return _LAZY_ATTRS[name]()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 SCHEMA_VERSION = 11
 
@@ -180,7 +193,7 @@ class SessionDB:
     _CHECKPOINT_EVERY_N_WRITES = 50
 
     def __init__(self, db_path: Path = None):
-        self.db_path = db_path or DEFAULT_DB_PATH
+        self.db_path = db_path or get_hermes_home() / "state.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._lock = threading.Lock()
