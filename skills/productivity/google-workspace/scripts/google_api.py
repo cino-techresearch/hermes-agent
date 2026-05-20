@@ -61,6 +61,48 @@ def _normalize_authorized_user_payload(payload: dict) -> dict:
     return normalized
 
 
+def _maybe_read_stdin_token() -> dict | None:
+    """Read token JSON from stdin if HERMES_TOKEN_STDIN=1. Fail-closed."""
+    if os.environ.get("HERMES_TOKEN_STDIN") != "1":
+        return None
+    # bounded read (max 64KB)
+    line = sys.stdin.buffer.read(64 * 1024)
+    if not line:
+        sys.exit(1)  # empty stdin
+    try:
+        payload = json.loads(line.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        sys.exit(1)  # malformed — fail-closed
+    required = {"refresh_token", "client_id", "client_secret", "token_uri"}
+    if not required.issubset(payload):
+        sys.exit(1)  # missing required keys
+    return payload
+
+
+def _emit_refresh_envelope(token: dict) -> None:
+    """Emit HERMES_REFRESH_V1 envelope to stderr for backend to capture."""
+    import base64
+    import hashlib
+    import hmac
+    import secrets
+    import time
+    key = os.environ.get("HERMES_REFRESH_HMAC_KEY", "").encode()
+    if not key:
+        return
+    request_id = os.environ.get("HERMES_REQUEST_ID", "")
+    payload = {
+        "nonce": secrets.token_hex(32),
+        "request_id": request_id,
+        "user_id": os.environ.get("HERMES_USER_ID", ""),
+        "token": token,
+        "ts": int(time.time()),
+    }
+    payload_bytes = json.dumps(payload, separators=(",", ":")).encode()
+    payload_b64 = base64.b64encode(payload_bytes).decode()
+    sig = hmac.new(key, payload_bytes, hashlib.sha256).hexdigest()
+    print(f"HERMES_REFRESH_V1 {sig} {payload_b64}", file=sys.stderr, flush=True)
+
+
 def _ensure_authenticated():
     if not TOKEN_PATH.exists():
         print("Not authenticated. Run the setup script first:", file=sys.stderr)
@@ -175,12 +217,24 @@ def _datetime_with_timezone(value: str) -> str:
 
 
 def get_credentials():
-    """Load and refresh credentials from token file."""
-    _ensure_authenticated()
-
+    """Load and refresh credentials from token file or stdin pipe."""
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
 
+    stdin_token = _maybe_read_stdin_token()
+    if stdin_token is not None:
+        creds = Credentials.from_authorized_user_info(stdin_token, _stored_token_scopes())
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            refreshed = _normalize_authorized_user_payload(json.loads(creds.to_json()))
+            _emit_refresh_envelope(refreshed)
+        if not creds.valid:
+            print("Token is invalid.", file=sys.stderr)
+            sys.exit(1)
+        return creds
+
+    # Fallback: file-based credentials (CLI standalone use)
+    _ensure_authenticated()
     creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), _stored_token_scopes())
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
