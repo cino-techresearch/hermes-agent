@@ -159,8 +159,7 @@ def _is_backend_available(backend: str) -> bool:
 
 # ─── Firecrawl Client ────────────────────────────────────────────────────────
 
-_firecrawl_client = None
-_firecrawl_client_config = None
+_firecrawl_client_cache: dict = {}  # key: (str(hermes_home), *client_config) → client
 
 
 def _get_direct_firecrawl_config() -> Optional[tuple[Dict[str, str], tuple[str, Optional[str], Optional[str]]]]:
@@ -241,13 +240,16 @@ def _web_requires_env() -> list[str]:
 
 
 def _get_firecrawl_client():
-    """Get or create Firecrawl client.
+    """Get or create a tenant-keyed Firecrawl client.
 
     When ``web.use_gateway`` is set in config, the Tool Gateway is preferred
     even if direct Firecrawl credentials are present.  Otherwise direct
     Firecrawl takes precedence when explicitly configured.
+
+    Keyed by (str(hermes_home), *client_config) for tenant isolation (NFR-6).
     """
-    global _firecrawl_client, _firecrawl_client_config
+    import hermes_constants as hc
+    tenant_home = str(hc.get_hermes_home())
 
     direct_config = _get_direct_firecrawl_config()
     if direct_config is not None and not prefers_gateway("web"):
@@ -271,53 +273,58 @@ def _get_firecrawl_client():
             managed_gateway.nous_user_token,
         )
 
-    if _firecrawl_client is not None and _firecrawl_client_config == client_config:
-        return _firecrawl_client
+    cache_key = (tenant_home,) + client_config
+    if cache_key in _firecrawl_client_cache:
+        return _firecrawl_client_cache[cache_key]
 
     # Uses the module-level `Firecrawl` name (lazy proxy at module top).
-    _firecrawl_client = Firecrawl(**kwargs)
-    _firecrawl_client_config = client_config
-    return _firecrawl_client
+    client = Firecrawl(**kwargs)
+    _firecrawl_client_cache[cache_key] = client
+    return client
 
 # ─── Parallel Client ─────────────────────────────────────────────────────────
 
-_parallel_client = None
-_async_parallel_client = None
+_parallel_client_cache: dict = {}  # key: str(hermes_home) → Parallel
+_async_parallel_client_cache: dict = {}  # key: str(hermes_home) → AsyncParallel
 
 def _get_parallel_client():
-    """Get or create the Parallel sync client (lazy initialization).
+    """Get or create a tenant-keyed Parallel sync client (lazy initialization).
 
     Requires PARALLEL_API_KEY environment variable.
+    Keyed by str(hermes_home) for tenant isolation (NFR-6).
     """
     from parallel import Parallel
-    global _parallel_client
-    if _parallel_client is None:
+    import hermes_constants as hc
+    tenant_home = str(hc.get_hermes_home())
+    if tenant_home not in _parallel_client_cache:
         api_key = os.getenv("PARALLEL_API_KEY")
         if not api_key:
             raise ValueError(
                 "PARALLEL_API_KEY environment variable not set. "
                 "Get your API key at https://parallel.ai"
             )
-        _parallel_client = Parallel(api_key=api_key)
-    return _parallel_client
+        _parallel_client_cache[tenant_home] = Parallel(api_key=api_key)
+    return _parallel_client_cache[tenant_home]
 
 
 def _get_async_parallel_client():
-    """Get or create the Parallel async client (lazy initialization).
+    """Get or create a tenant-keyed Parallel async client (lazy initialization).
 
     Requires PARALLEL_API_KEY environment variable.
+    Keyed by str(hermes_home) for tenant isolation (NFR-6).
     """
     from parallel import AsyncParallel
-    global _async_parallel_client
-    if _async_parallel_client is None:
+    import hermes_constants as hc
+    tenant_home = str(hc.get_hermes_home())
+    if tenant_home not in _async_parallel_client_cache:
         api_key = os.getenv("PARALLEL_API_KEY")
         if not api_key:
             raise ValueError(
                 "PARALLEL_API_KEY environment variable not set. "
                 "Get your API key at https://parallel.ai"
             )
-        _async_parallel_client = AsyncParallel(api_key=api_key)
-    return _async_parallel_client
+        _async_parallel_client_cache[tenant_home] = AsyncParallel(api_key=api_key)
+    return _async_parallel_client_cache[tenant_home]
 
 # ─── Tavily Client ───────────────────────────────────────────────────────────
 
@@ -912,25 +919,28 @@ def clean_base64_images(text: str) -> str:
 
 # ─── Exa Client ──────────────────────────────────────────────────────────────
 
-_exa_client = None
+_exa_client_cache: dict = {}  # key: str(hermes_home) → Exa
 
 def _get_exa_client():
-    """Get or create the Exa client (lazy initialization).
+    """Get or create a tenant-keyed Exa client (lazy initialization).
 
     Requires EXA_API_KEY environment variable.
+    Keyed by str(hermes_home) for tenant isolation (NFR-6).
     """
     from exa_py import Exa
-    global _exa_client
-    if _exa_client is None:
+    import hermes_constants as hc
+    tenant_home = str(hc.get_hermes_home())
+    if tenant_home not in _exa_client_cache:
         api_key = os.getenv("EXA_API_KEY")
         if not api_key:
             raise ValueError(
                 "EXA_API_KEY environment variable not set. "
                 "Get your API key at https://exa.ai"
             )
-        _exa_client = Exa(api_key=api_key)
-        _exa_client.headers["x-exa-integration"] = "hermes-agent"
-    return _exa_client
+        client = Exa(api_key=api_key)
+        client.headers["x-exa-integration"] = "hermes-agent"
+        _exa_client_cache[tenant_home] = client
+    return _exa_client_cache[tenant_home]
 
 
 # ─── Exa Search & Extract Helpers ─────────────────────────────────────────────

@@ -311,8 +311,7 @@ UPSCALER_NUM_INFERENCE_STEPS = 18
 
 
 _debug = DebugSession("image_tools", env_var="IMAGE_TOOLS_DEBUG")
-_managed_fal_client = None
-_managed_fal_client_config = None
+_managed_fal_client_cache: dict = {}  # key: (str(hermes_home), gateway_origin, token) → client
 _managed_fal_client_lock = threading.Lock()
 
 
@@ -414,23 +413,28 @@ class _ManagedFalSyncClient:
 
 
 def _get_managed_fal_client(managed_gateway):
-    """Reuse the managed FAL client so its internal httpx.Client is not leaked per call."""
-    global _managed_fal_client, _managed_fal_client_config
+    """Return a tenant-keyed managed FAL client, creating one if needed.
 
-    client_config = (
+    Keyed by (str(hermes_home), gateway_origin, token) so each tenant gets an
+    isolated httpx.Client instance (NFR-6, Phase 0-C, T-007).
+    """
+    import hermes_constants as hc
+    tenant_home = str(hc.get_hermes_home())
+    cache_key = (
+        tenant_home,
         managed_gateway.gateway_origin.rstrip("/"),
         managed_gateway.nous_user_token,
     )
     with _managed_fal_client_lock:
-        if _managed_fal_client is not None and _managed_fal_client_config == client_config:
-            return _managed_fal_client
+        if cache_key in _managed_fal_client_cache:
+            return _managed_fal_client_cache[cache_key]
 
-        _managed_fal_client = _ManagedFalSyncClient(
+        client = _ManagedFalSyncClient(
             key=managed_gateway.nous_user_token,
             queue_run_origin=managed_gateway.gateway_origin,
         )
-        _managed_fal_client_config = client_config
-        return _managed_fal_client
+        _managed_fal_client_cache[cache_key] = client
+        return client
 
 
 def _submit_fal_request(model: str, arguments: Dict[str, Any]):
