@@ -52,10 +52,12 @@ DELEGATE_BLOCKED_TOOLS = frozenset(
 # Subagent approval callbacks
 # ---------------------------------------------------------------------------
 # Subagents run inside a ThreadPoolExecutor worker. The CLI's interactive
-# approval callback is stored in tools/terminal_tool.py's threading.local(),
-# so worker threads do NOT inherit it. Without a callback,
-# prompt_dangerous_approval() falls back to input() from the worker thread,
-# which deadlocks against the parent's prompt_toolkit TUI that owns stdin.
+# approval callback is stored in tools/terminal_tool.py's ContextVar
+# (_approval_cv), which is task-scoped and NOT automatically inherited by
+# ThreadPoolExecutor workers (unlike asyncio.Task). Without an explicit
+# callback installed, prompt_dangerous_approval() falls back to input() from
+# the worker thread, which deadlocks against the parent's prompt_toolkit TUI
+# that owns stdin.
 #
 # Fix: install a non-interactive callback into every subagent worker thread
 # via ThreadPoolExecutor(initializer=_set_subagent_approval_cb, initargs=(cb,)).
@@ -64,7 +66,7 @@ DELEGATE_BLOCKED_TOOLS = frozenset(
 #   true            → _subagent_auto_approve (opt-in YOLO for cron/batch)
 # Both emit a logger.warning for audit; gateway sessions are unaffected
 # because they resolve approvals via tools/approval.py's per-session queue,
-# not through these TLS callbacks.
+# not through these ContextVar callbacks.
 def _subagent_auto_deny(command: str, description: str, **kwargs) -> str:
     """Auto-deny dangerous commands in subagent threads (safe default).
 
