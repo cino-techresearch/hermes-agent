@@ -43,6 +43,7 @@ Payment / credit exhaustion fallback:
 import json
 import logging
 import os
+import sys as _sys
 import threading
 import time
 from pathlib import Path  # noqa: F401 — used by test mocks
@@ -289,8 +290,9 @@ _OPENROUTER_MODEL = "google/gemini-3-flash-preview"
 _NOUS_MODEL = "google/gemini-3-flash-preview"
 _NOUS_DEFAULT_BASE_URL = "https://inference-api.nousresearch.com/v1"
 _ANTHROPIC_DEFAULT_BASE_URL = "https://api.anthropic.com"
-# Phase 0-A (multitenant runtime): lazy via __getattr__ for external access;
-# internal usages below call get_hermes_home() directly at call time.
+# Phase 0-A multitenant: PEP 562 __getattr__ is module-external only; internal access
+# must go through sys.modules to honor both monkeypatch (__dict__ first) and ContextVar
+# fallback (__getattr__).
 
 _LAZY_ATTRS: dict[str, Any] = {
     "_AUTH_JSON_PATH": lambda: get_hermes_home() / "auth.json",
@@ -976,7 +978,7 @@ def _read_nous_auth() -> Optional[dict]:
         }
 
     try:
-        _auth_json_path = get_hermes_home() / "auth.json"
+        _auth_json_path = _sys.modules[__name__]._AUTH_JSON_PATH
         if not _auth_json_path.is_file():
             return None
         data = json.loads(_auth_json_path.read_text())

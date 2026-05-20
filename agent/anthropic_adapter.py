@@ -16,6 +16,7 @@ import logging
 import os
 import platform
 import subprocess
+import sys as _sys
 from pathlib import Path
 
 from hermes_constants import get_hermes_home
@@ -1016,8 +1017,9 @@ _OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 _OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
 _OAUTH_REDIRECT_URI = "https://console.anthropic.com/oauth/code/callback"
 _OAUTH_SCOPES = "org:create_api_key user:profile user:inference"
-# Phase 0-A (multitenant runtime): lazy via __getattr__ for external access;
-# internal usages below call get_hermes_home() directly at call time.
+# Phase 0-A multitenant: PEP 562 __getattr__ is module-external only; internal access
+# must go through sys.modules to honor both monkeypatch (__dict__ first) and ContextVar
+# fallback (__getattr__).
 
 _LAZY_ATTRS: dict[str, Any] = {
     "_HERMES_OAUTH_FILE": lambda: get_hermes_home() / ".anthropic_oauth.json",
@@ -1143,9 +1145,9 @@ def run_hermes_oauth_login_pure() -> Optional[Dict[str, Any]]:
 
 def read_hermes_oauth_credentials() -> Optional[Dict[str, Any]]:
     """Read Hermes-managed OAuth credentials from ~/.hermes/.anthropic_oauth.json."""
-    if _HERMES_OAUTH_FILE.exists():
+    if _sys.modules[__name__]._HERMES_OAUTH_FILE.exists():
         try:
-            data = json.loads(_HERMES_OAUTH_FILE.read_text(encoding="utf-8"))
+            data = json.loads(_sys.modules[__name__]._HERMES_OAUTH_FILE.read_text(encoding="utf-8"))
             if data.get("accessToken"):
                 return data
         except (json.JSONDecodeError, OSError, IOError) as e:
