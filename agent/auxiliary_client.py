@@ -2731,7 +2731,10 @@ def _client_cache_key(
 ) -> tuple:
     runtime = _normalize_main_runtime(main_runtime)
     runtime_key = tuple(runtime.get(field, "") for field in _MAIN_RUNTIME_FIELDS) if provider == "auto" else ()
-    return (provider, async_mode, base_url or "", api_key or "", api_mode or "", runtime_key, is_vision)
+    # Tenant isolation: include HERMES_HOME so cross-tenant cache hits are impossible
+    # when multiple tenants share the same process with different HERMES_HOME values.
+    tenant_home = str(get_hermes_home())
+    return (tenant_home, provider, async_mode, base_url or "", api_key or "", api_mode or "", runtime_key, is_vision)
 
 
 def _store_cached_client(cache_key: tuple, client: Any, default_model: Optional[str], *, bound_loop: Any = None) -> None:

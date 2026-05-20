@@ -247,7 +247,10 @@ def _credentials_lock(timeout_seconds: float = LOCK_TIMEOUT_SECONDS):
 # Client ID resolution
 # =============================================================================
 
-_scraped_creds_cache: Dict[str, str] = {}
+# Tenant-aware credential scrape cache. Keys are (tenant_home, field) tuples
+# where tenant_home = str(get_hermes_home()). This prevents cross-tenant leak
+# when multiple tenants share the same process with different HERMES_HOME values.
+_scraped_creds_cache: Dict[tuple, str] = {}
 
 
 def _locate_gemini_cli_oauth_js() -> Optional[Path]:
@@ -304,19 +307,20 @@ def _locate_gemini_cli_oauth_js() -> Optional[Path]:
 
 def _scrape_client_credentials() -> Tuple[str, str]:
     """Extract client_id + client_secret from the local gemini-cli install."""
-    if _scraped_creds_cache.get("resolved"):
-        return _scraped_creds_cache.get("client_id", ""), _scraped_creds_cache.get("client_secret", "")
+    _tenant = str(get_hermes_home())
+    if _scraped_creds_cache.get((_tenant, "resolved")):
+        return _scraped_creds_cache.get((_tenant, "client_id"), ""), _scraped_creds_cache.get((_tenant, "client_secret"), "")
 
     oauth_js = _locate_gemini_cli_oauth_js()
     if oauth_js is None:
-        _scraped_creds_cache["resolved"] = "1"  # Don't retry on every call
+        _scraped_creds_cache[(_tenant, "resolved")] = "1"  # Don't retry on every call
         return "", ""
 
     try:
         content = oauth_js.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         logger.debug("Failed to read oauth2.js at %s: %s", oauth_js, exc)
-        _scraped_creds_cache["resolved"] = "1"
+        _scraped_creds_cache[(_tenant, "resolved")] = "1"
         return "", ""
 
     # Precise pattern first, then fallback shape match
@@ -326,9 +330,9 @@ def _scrape_client_credentials() -> Tuple[str, str]:
     client_id = cid_match.group(1) if cid_match else ""
     client_secret = cs_match.group(1) if cs_match else ""
 
-    _scraped_creds_cache["client_id"] = client_id
-    _scraped_creds_cache["client_secret"] = client_secret
-    _scraped_creds_cache["resolved"] = "1"
+    _scraped_creds_cache[(_tenant, "client_id")] = client_id
+    _scraped_creds_cache[(_tenant, "client_secret")] = client_secret
+    _scraped_creds_cache[(_tenant, "resolved")] = "1"
 
     if client_id:
         logger.info("Scraped Gemini OAuth client from %s", oauth_js)
@@ -632,6 +636,10 @@ def _fetch_user_email(access_token: str, timeout: float = TOKEN_REQUEST_TIMEOUT_
 # In-flight refresh deduplication
 # =============================================================================
 
+# NOT a cache — this is a concurrency lock to serialize concurrent OAuth refreshes
+# for the same user. Key is the refresh_token, which is per-user (never shared across
+# users), so cross-tenant leak is not possible. Parallel refreshes for different users
+# (including different tenants) are correctly allowed to proceed concurrently.
 _refresh_inflight: Dict[str, threading.Event] = {}
 _refresh_inflight_lock = threading.Lock()
 

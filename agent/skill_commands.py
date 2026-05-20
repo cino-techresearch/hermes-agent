@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from hermes_constants import display_hermes_home
+from hermes_constants import display_hermes_home, get_hermes_home
 from agent.skill_preprocessing import (
     expand_inline_shell as _expand_inline_shell,
     load_skills_config as _load_skills_config,
@@ -19,7 +19,10 @@ from agent.skill_preprocessing import (
 
 logger = logging.getLogger(__name__)
 
-_skill_commands: Dict[str, Dict[str, Any]] = {}
+# Tenant-aware skill commands cache. Outer key is str(get_hermes_home()); inner key
+# is "/skill-name". This prevents cross-tenant cache hits when multiple tenants share
+# the same process with different HERMES_HOME values (and thus different skills dirs).
+_skill_commands: Dict[str, Dict[str, Dict[str, Any]]] = {}
 # Patterns for sanitizing skill names into clean hyphen-separated slugs.
 _SKILL_INVALID_CHARS = re.compile(r"[^a-z0-9-]")
 _SKILL_MULTI_HYPHEN = re.compile(r"-{2,}")
@@ -218,8 +221,9 @@ def scan_skill_commands() -> Dict[str, Dict[str, Any]]:
     Returns:
         Dict mapping "/skill-name" to {name, description, skill_md_path, skill_dir}.
     """
-    global _skill_commands
-    _skill_commands = {}
+    _tenant = str(get_hermes_home())
+    _skill_commands[_tenant] = {}
+    _tenant_cmds = _skill_commands[_tenant]
     try:
         from tools.skills_tool import SKILLS_DIR, _parse_frontmatter, skill_matches_platform, _get_disabled_skill_names
         from agent.skill_utils import get_external_skills_dirs, iter_skill_index_files
@@ -264,7 +268,7 @@ def scan_skill_commands() -> Dict[str, Dict[str, Any]]:
                     cmd_name = _SKILL_MULTI_HYPHEN.sub('-', cmd_name).strip('-')
                     if not cmd_name:
                         continue
-                    _skill_commands[f"/{cmd_name}"] = {
+                    _tenant_cmds[f"/{cmd_name}"] = {
                         "name": name,
                         "description": description or f"Invoke the {name} skill",
                         "skill_md_path": str(skill_md),
@@ -274,14 +278,15 @@ def scan_skill_commands() -> Dict[str, Dict[str, Any]]:
                     continue
     except Exception:
         pass
-    return _skill_commands
+    return _tenant_cmds
 
 
 def get_skill_commands() -> Dict[str, Dict[str, Any]]:
     """Return the current skill commands mapping (scan first if empty)."""
-    if not _skill_commands:
+    _tenant = str(get_hermes_home())
+    if _tenant not in _skill_commands:
         scan_skill_commands()
-    return _skill_commands
+    return _skill_commands.get(_tenant, {})
 
 
 def reload_skills() -> Dict[str, Any]:
@@ -323,10 +328,11 @@ def reload_skills() -> Dict[str, Any]:
             out[bare] = (info or {}).get("description") or ""
         return out
 
-    before = _snapshot(_skill_commands)
+    _tenant = str(get_hermes_home())
+    before = _snapshot(_skill_commands.get(_tenant, {}))
 
-    # Rescan the skills dir. ``scan_skill_commands`` resets
-    # ``_skill_commands = {}`` internally and repopulates it.
+    # Rescan the skills dir. ``scan_skill_commands`` resets the tenant entry
+    # in ``_skill_commands`` and repopulates it.
     new_commands = scan_skill_commands()
 
     after = _snapshot(new_commands)

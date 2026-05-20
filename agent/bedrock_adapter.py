@@ -41,8 +41,30 @@ logger = logging.getLogger(__name__)
 # This keeps startup fast for users who don't use Bedrock.
 # ---------------------------------------------------------------------------
 
-_bedrock_runtime_client_cache: Dict[str, Any] = {}
-_bedrock_control_client_cache: Dict[str, Any] = {}
+# Tenant-aware client caches. Keys are (tenant_key, region) tuples where
+# tenant_key is a fingerprint of the active AWS credential env vars. This
+# prevents cross-tenant cache hits when multiple tenants share the same process
+# with different AWS credentials injected via environment variables.
+_bedrock_runtime_client_cache: Dict[tuple, Any] = {}
+_bedrock_control_client_cache: Dict[tuple, Any] = {}
+
+
+def _bedrock_tenant_key() -> str:
+    """Return a fingerprint of the active AWS credential env vars.
+
+    Used as the per-tenant component of the cache key so that different tenants
+    with different AWS credentials never share the same boto3 client instance.
+    """
+    return "|".join(
+        os.environ.get(v, "") for v in (
+            "AWS_BEARER_TOKEN_BEDROCK",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_PROFILE",
+            "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+            "AWS_WEB_IDENTITY_TOKEN_FILE",
+        )
+    )
 
 
 def _require_boto3():
@@ -63,22 +85,24 @@ def _get_bedrock_runtime_client(region: str):
 
     Uses the default AWS credential chain (env vars → profile → instance role).
     """
-    if region not in _bedrock_runtime_client_cache:
+    key = (_bedrock_tenant_key(), region)
+    if key not in _bedrock_runtime_client_cache:
         boto3 = _require_boto3()
-        _bedrock_runtime_client_cache[region] = boto3.client(
+        _bedrock_runtime_client_cache[key] = boto3.client(
             "bedrock-runtime", region_name=region,
         )
-    return _bedrock_runtime_client_cache[region]
+    return _bedrock_runtime_client_cache[key]
 
 
 def _get_bedrock_control_client(region: str):
     """Get or create a cached ``bedrock`` control-plane client for model discovery."""
-    if region not in _bedrock_control_client_cache:
+    key = (_bedrock_tenant_key(), region)
+    if key not in _bedrock_control_client_cache:
         boto3 = _require_boto3()
-        _bedrock_control_client_cache[region] = boto3.client(
+        _bedrock_control_client_cache[key] = boto3.client(
             "bedrock", region_name=region,
         )
-    return _bedrock_control_client_cache[region]
+    return _bedrock_control_client_cache[key]
 
 
 def reset_client_cache():
@@ -98,8 +122,9 @@ def invalidate_runtime_client(region: str) -> bool:
     Returns True if a cached entry was evicted, False if the region was not
     cached.
     """
-    existed = region in _bedrock_runtime_client_cache
-    _bedrock_runtime_client_cache.pop(region, None)
+    key = (_bedrock_tenant_key(), region)
+    existed = key in _bedrock_runtime_client_cache
+    _bedrock_runtime_client_cache.pop(key, None)
     return existed
 
 
