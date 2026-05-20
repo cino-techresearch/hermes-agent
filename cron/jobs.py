@@ -102,12 +102,10 @@ def _secure_file(path: Path):
 
 def ensure_dirs():
     """Ensure cron directories exist with secure permissions."""
-    _cron_dir = get_hermes_home().resolve() / "cron"
-    _output_dir = _cron_dir / "output"
-    _cron_dir.mkdir(parents=True, exist_ok=True)
-    _output_dir.mkdir(parents=True, exist_ok=True)
-    _secure_dir(_cron_dir)
-    _secure_dir(_output_dir)
+    CRON_DIR.mkdir(parents=True, exist_ok=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    _secure_dir(CRON_DIR)
+    _secure_dir(OUTPUT_DIR)
 
 
 # =============================================================================
@@ -355,18 +353,17 @@ def compute_next_run(schedule: Dict[str, Any], last_run_at: Optional[str] = None
 def load_jobs() -> List[Dict[str, Any]]:
     """Load all jobs from storage."""
     ensure_dirs()
-    _jobs_file = get_hermes_home().resolve() / "cron" / "jobs.json"
-    if not _jobs_file.exists():
+    if not JOBS_FILE.exists():
         return []
 
     try:
-        with open(_jobs_file, 'r', encoding='utf-8') as f:
+        with open(JOBS_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
             return data.get("jobs", [])
     except json.JSONDecodeError:
         # Retry with strict=False to handle bare control chars in string values
         try:
-            with open(_jobs_file, 'r', encoding='utf-8') as f:
+            with open(JOBS_FILE, 'r', encoding='utf-8') as f:
                 data = json.loads(f.read(), strict=False)
                 jobs = data.get("jobs", [])
                 if jobs:
@@ -385,15 +382,14 @@ def load_jobs() -> List[Dict[str, Any]]:
 def save_jobs(jobs: List[Dict[str, Any]]):
     """Save all jobs to storage."""
     ensure_dirs()
-    _jobs_file = get_hermes_home().resolve() / "cron" / "jobs.json"
-    fd, tmp_path = tempfile.mkstemp(dir=str(_jobs_file.parent), suffix='.tmp', prefix='.jobs_')
+    fd, tmp_path = tempfile.mkstemp(dir=str(JOBS_FILE.parent), suffix='.tmp', prefix='.jobs_')
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             json.dump({"jobs": jobs, "updated_at": _hermes_now().isoformat()}, f, indent=2)
             f.flush()
             os.fsync(f.fileno())
-        atomic_replace(tmp_path, _jobs_file)
-        _secure_file(_jobs_file)
+        atomic_replace(tmp_path, JOBS_FILE)
+        _secure_file(JOBS_FILE)
     except BaseException:
         try:
             os.unlink(tmp_path)
@@ -875,7 +871,7 @@ def get_due_jobs() -> List[Dict[str, Any]]:
 def save_job_output(job_id: str, output: str):
     """Save job output to file."""
     ensure_dirs()
-    job_output_dir = get_hermes_home().resolve() / "cron" / "output" / job_id
+    job_output_dir = OUTPUT_DIR / job_id
     job_output_dir.mkdir(parents=True, exist_ok=True)
     _secure_dir(job_output_dir)
     

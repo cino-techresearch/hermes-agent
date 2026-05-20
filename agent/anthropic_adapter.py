@@ -1143,10 +1143,9 @@ def run_hermes_oauth_login_pure() -> Optional[Dict[str, Any]]:
 
 def read_hermes_oauth_credentials() -> Optional[Dict[str, Any]]:
     """Read Hermes-managed OAuth credentials from ~/.hermes/.anthropic_oauth.json."""
-    _hermes_oauth_file = get_hermes_home() / ".anthropic_oauth.json"
-    if _hermes_oauth_file.exists():
+    if _HERMES_OAUTH_FILE.exists():
         try:
-            data = json.loads(_hermes_oauth_file.read_text(encoding="utf-8"))
+            data = json.loads(_HERMES_OAUTH_FILE.read_text(encoding="utf-8"))
             if data.get("accessToken"):
                 return data
         except (json.JSONDecodeError, OSError, IOError) as e:
