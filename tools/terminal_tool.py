@@ -33,6 +33,7 @@ Usage:
     result = terminal_tool("python server.py", background=True)
 """
 
+import contextvars
 import importlib.util
 import json
 import logging
@@ -231,35 +232,35 @@ _sudo_password_cache_lock = threading.Lock()
 # own callback exactly like before. Gateway mode resolves approvals via
 # the per-session queue in tools.approval, not through these callbacks,
 # so it's unaffected.
-import threading
-_callback_tls = threading.local()
+_sudo_password_cv: contextvars.ContextVar = contextvars.ContextVar("_sudo_password_cv", default=None)
+_approval_cv: contextvars.ContextVar = contextvars.ContextVar("_approval_cv", default=None)
 
 
 def _get_sudo_password_callback():
-    return getattr(_callback_tls, "sudo_password", None)
+    return _sudo_password_cv.get()
 
 
 def _get_approval_callback():
-    return getattr(_callback_tls, "approval", None)
+    return _approval_cv.get()
 
 
 def set_sudo_password_callback(cb):
     """Register a callback for sudo password prompts (used by CLI).
 
-    Per-thread scope — ACP sessions that run concurrently in a
-    ThreadPoolExecutor each have their own callback slot.
+    Per-context scope — ACP sessions that run concurrently each have their own
+    callback slot; thread reuse does not leak callbacks across tenants.
     """
-    _callback_tls.sudo_password = cb
+    _sudo_password_cv.set(cb)
 
 
 def set_approval_callback(cb):
     """Register a callback for dangerous command approval prompts.
 
-    Per-thread scope — ACP sessions that run concurrently in a
-    ThreadPoolExecutor each have their own callback slot. See
-    GHSA-qg5c-hvr5-hjgr.
+    Per-context scope — ACP sessions that run concurrently each have their own
+    callback slot; thread reuse does not leak callbacks across tenants.
+    See GHSA-qg5c-hvr5-hjgr.
     """
-    _callback_tls.approval = cb
+    _approval_cv.set(cb)
 
 
 def _get_sudo_password_cache_scope() -> str:

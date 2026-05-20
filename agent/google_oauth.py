@@ -50,7 +50,7 @@ import logging
 import os
 import secrets
 import stat
-import threading
+import contextvars
 import time
 import urllib.error
 import urllib.parse
@@ -161,19 +161,19 @@ def _lock_path() -> Path:
     return _credentials_path().with_suffix(".json.lock")
 
 
-_lock_state = threading.local()
+_lock_depth: contextvars.ContextVar[int] = contextvars.ContextVar("_lock_depth", default=0)
 
 
 @contextlib.contextmanager
 def _credentials_lock(timeout_seconds: float = LOCK_TIMEOUT_SECONDS):
     """Cross-process lock around the credentials file (fcntl POSIX / msvcrt Windows)."""
-    depth = getattr(_lock_state, "depth", 0)
+    depth = _lock_depth.get()
     if depth > 0:
-        _lock_state.depth = depth + 1
+        _lock_depth.set(depth + 1)
         try:
             yield
         finally:
-            _lock_state.depth -= 1
+            _lock_depth.set(_lock_depth.get() - 1)
         return
 
     lock_file_path = _lock_path()
@@ -218,7 +218,7 @@ def _credentials_lock(timeout_seconds: float = LOCK_TIMEOUT_SECONDS):
             except ImportError:
                 acquired = True
 
-        _lock_state.depth = 1
+        _lock_depth.set(1)
         yield
     finally:
         try:
@@ -239,7 +239,7 @@ def _credentials_lock(timeout_seconds: float = LOCK_TIMEOUT_SECONDS):
                         pass
         finally:
             os.close(fd)
-            _lock_state.depth = 0
+            _lock_depth.set(0)
 
 
 # =============================================================================

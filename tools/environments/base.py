@@ -7,6 +7,7 @@ or a temp file (local).
 """
 
 import codecs
+import contextvars
 import json
 import logging
 import os
@@ -38,18 +39,21 @@ if _DEBUG_INTERRUPT:
     # agent.log regardless of quiet-mode.  Scoped to the opt-in case only.
     logger.setLevel(logging.INFO)
 
-# Thread-local activity callback.  The agent sets this before a tool call so
+# ContextVar activity callback.  The agent sets this before a tool call so
 # long-running _wait_for_process loops can report liveness to the gateway.
-_activity_callback_local = threading.local()
+# ContextVar is task-scoped, so thread reuse does not leak callbacks across tenants.
+_activity_callback_cv: contextvars.ContextVar[Callable[[str], None] | None] = contextvars.ContextVar(
+    "_activity_callback_cv", default=None
+)
 
 
 def set_activity_callback(cb: Callable[[str], None] | None) -> None:
     """Register a callback that _wait_for_process fires periodically."""
-    _activity_callback_local.callback = cb
+    _activity_callback_cv.set(cb)
 
 
 def _get_activity_callback() -> Callable[[str], None] | None:
-    return getattr(_activity_callback_local, "callback", None)
+    return _activity_callback_cv.get()
 
 
 def touch_activity_if_due(
