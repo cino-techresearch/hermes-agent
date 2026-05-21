@@ -16,6 +16,7 @@ The parent's context only sees the delegation call and the summary result,
 never the child's intermediate tool calls or reasoning.
 """
 
+import contextvars
 import enum
 import json
 import logging
@@ -1432,7 +1433,7 @@ def _run_single_child(
                 task_id=child_task_id,
             )
 
-        _child_future = _timeout_executor.submit(_run_with_thread_capture)
+        _child_future = _timeout_executor.submit(contextvars.copy_context().run, _run_with_thread_capture)
         try:
             result = _child_future.result(timeout=child_timeout)
         except Exception as _timeout_exc:
@@ -1988,6 +1989,7 @@ def delegate_task(
             futures = {}
             for i, t, child in children:
                 future = executor.submit(
+                    contextvars.copy_context().run,
                     _run_single_child,
                     task_index=i,
                     goal=t["goal"],

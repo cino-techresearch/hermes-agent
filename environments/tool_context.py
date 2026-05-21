@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional
 
 import asyncio
 import concurrent.futures
+import contextvars
 
 from model_tools import handle_function_call
 from tools.terminal_tool import cleanup_vm
@@ -55,7 +56,8 @@ def _run_tool_in_thread(tool_name: str, arguments: Dict[str, Any], task_id: str)
         # We're in an async context -- need to run in thread
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(
-                handle_function_call, tool_name, arguments, task_id
+                contextvars.copy_context().run,
+                handle_function_call, tool_name, arguments, task_id,
             )
             return future.result(timeout=300)
     except RuntimeError:

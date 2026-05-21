@@ -13,6 +13,7 @@ This is a library module (not an agent tool). It provides:
 Used by hermes_cli/skills_hub.py for CLI commands and the /skills slash command.
 """
 
+import contextvars
 import hashlib
 import json
 import logging
@@ -3176,7 +3177,7 @@ def parallel_search_sources(
         futures = {}
         for src in active:
             lim = per_source_limits.get(src.source_id(), 50)
-            fut = pool.submit(_search_one_source, src, query, lim)
+            fut = pool.submit(contextvars.copy_context().run, _search_one_source, src, query, lim)
             futures[fut] = src.source_id()
 
         try:

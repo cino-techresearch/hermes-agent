@@ -13,6 +13,7 @@ handle_function_call() from model_tools.py.
 
 import asyncio
 import concurrent.futures
+import contextvars
 import json
 import logging
 import os
@@ -406,9 +407,11 @@ class HermesAgentLoop:
                                     loop = asyncio.get_event_loop()
                                     # Capture current tool_name/args for the lambda
                                     _tn, _ta, _tid = tool_name, args, self.task_id
+                                    _ctx = contextvars.copy_context()
                                     tool_result = await loop.run_in_executor(
                                         _tool_executor,
-                                        lambda: handle_function_call(
+                                        lambda: _ctx.run(
+                                            handle_function_call,
                                             _tn, _ta, task_id=_tid,
                                             user_task=_user_task,
                                         ),
