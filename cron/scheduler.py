@@ -798,10 +798,14 @@ def _build_job_prompt(job: dict, prerun_script: Optional[tuple] = None) -> str:
 def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
     """
     Execute a single cron job.
-    
+
     Returns:
         Tuple of (success, full_output_doc, final_response, error_message)
     """
+    # FR-019: guard — vendor cron disabled by default in SaaS multitenant mode.
+    if os.environ.get("VENDOR_CRON_ENABLED", "").lower() not in ("true", "1", "yes"):
+        return False, "", "", "vendor cron disabled (VENDOR_CRON_ENABLED not set)"
+
     from run_agent import AIAgent
     
     # Initialize SQLite session store so cron job messages are persisted
@@ -1258,18 +1262,23 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
 def tick(verbose: bool = True, adapters=None, loop=None) -> int:
     """
     Check and run all due jobs.
-    
+
     Uses a file lock so only one tick runs at a time, even if the gateway's
     in-process ticker and a standalone daemon or manual tick overlap.
-    
+
     Args:
         verbose: Whether to print status messages
         adapters: Optional dict mapping Platform → live adapter (from gateway)
         loop: Optional asyncio event loop (from gateway) for live adapter sends
-    
+
     Returns:
         Number of jobs executed (0 if another tick is already running)
     """
+    # FR-019: guard — vendor cron disabled by default in SaaS multitenant mode.
+    # Set VENDOR_CRON_ENABLED=true to allow this process to fire cron jobs.
+    if os.environ.get("VENDOR_CRON_ENABLED", "").lower() not in ("true", "1", "yes"):
+        return None  # type: ignore[return-value]
+
     _LOCK_DIR.mkdir(parents=True, exist_ok=True)
 
     # Cross-platform file locking: fcntl on Unix, msvcrt on Windows
