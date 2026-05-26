@@ -58,6 +58,7 @@ import re
 import signal
 import subprocess
 import shutil
+from spawn_proxy import spawn
 import sys
 import tempfile
 import threading
@@ -1493,25 +1494,22 @@ def _run_browser_command(
         stdout_fd = os.open(stdout_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         stderr_fd = os.open(stderr_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
-            proc = subprocess.Popen(
-                cmd_parts,
-                stdout=stdout_fd,
-                stderr=stderr_fd,
-                stdin=subprocess.DEVNULL,
-                env=browser_env,
-            )
+            try:
+                proc = spawn(
+                    cmd_parts,
+                    stdout=stdout_fd,
+                    stderr=stderr_fd,
+                    stdin=subprocess.DEVNULL,
+                    env=browser_env,
+                    timeout=timeout,
+                )
+            except subprocess.TimeoutExpired:
+                logger.warning("browser '%s' timed out after %ds (task=%s, socket_dir=%s)",
+                               command, timeout, task_id, task_socket_dir)
+                return {"success": False, "error": f"Command timed out after {timeout} seconds"}
         finally:
             os.close(stdout_fd)
             os.close(stderr_fd)
-
-        try:
-            proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            logger.warning("browser '%s' timed out after %ds (task=%s, socket_dir=%s)",
-                           command, timeout, task_id, task_socket_dir)
-            return {"success": False, "error": f"Command timed out after {timeout} seconds"}
 
         with open(stdout_path, "r") as f:
             stdout = f.read()
