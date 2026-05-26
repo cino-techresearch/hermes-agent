@@ -75,8 +75,8 @@ class TestSpawnAfterConfigure:
         monkeypatch.setenv("HOME", "/tmp")
         monkeypatch.setenv("SECRET_TOKEN", "should-be-filtered")
         spawn_proxy.configure(
-            uid=0,
-            gid=0,
+            uid=1000,
+            gid=1000,
             cwd=str(tmp_path),
             env_allowlist=["PATH", "HOME"],
         )
@@ -100,8 +100,8 @@ class TestSpawnAfterConfigure:
         monkeypatch.delenv("HOME", raising=False)
         monkeypatch.setenv("EXTRA", "noise")
         spawn_proxy.configure(
-            uid=0,
-            gid=0,
+            uid=1000,
+            gid=1000,
             cwd=str(tmp_path),
             env_allowlist=["PATH"],
         )
