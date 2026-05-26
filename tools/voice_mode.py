@@ -22,6 +22,8 @@ import time
 import wave
 from typing import Any, Dict, List, Optional
 
+from spawn_proxy import spawn
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -299,7 +301,7 @@ class TermuxAudioRecorder:
             "-c", str(CHANNELS),
         ]
         try:
-            subprocess.run(command, capture_output=True, text=True, timeout=15, check=True)
+            spawn(command, capture_output=True, text=True, timeout=15, check=True)
         except subprocess.CalledProcessError as e:
             details = (e.stderr or e.stdout or str(e)).strip()
             raise RuntimeError(f"Termux microphone start failed: {details}") from e
@@ -316,7 +318,7 @@ class TermuxAudioRecorder:
         mic_cmd = _termux_microphone_command()
         if not mic_cmd:
             return
-        subprocess.run([mic_cmd, "-q"], capture_output=True, text=True, timeout=15, check=False)
+        spawn([mic_cmd, "-q"], capture_output=True, text=True, timeout=15, check=False)
 
     def stop(self) -> Optional[str]:
         with self._lock:

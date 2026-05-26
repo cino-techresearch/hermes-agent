@@ -473,7 +473,7 @@ class ProcessRegistry:
         Args:
             use_pty: If True, use a pseudo-terminal via ptyprocess for interactive
                      CLI tools (Codex, Claude Code, Python REPL). Falls back to
-                     subprocess.Popen if ptyprocess is not installed.
+                     Popen (via spawn_proxy) if ptyprocess is not installed.
         """
         session = ProcessSession(
             id=f"proc_{uuid.uuid4().hex[:12]}",
