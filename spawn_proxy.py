@@ -14,6 +14,10 @@ _CONFIG: dict[str, Any] | None = None
 
 def configure(*, uid: int, gid: int, cwd: str, env_allowlist: list[str]) -> None:
     """Set process-wide spawn configuration. Must be called before spawn()."""
+    if uid == 0 or gid == 0:
+        raise ValueError(
+            f"spawn_proxy: root uid/gid forbidden (uid={uid}, gid={gid})"
+        )
     global _CONFIG
     _CONFIG = {"uid": uid, "gid": gid, "cwd": cwd, "env_allowlist": env_allowlist}
 
