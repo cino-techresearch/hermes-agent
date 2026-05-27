@@ -291,3 +291,137 @@ class TestNoNewPrivs:
 
         PR_SET_NO_NEW_PRIVS = 38
         mock_prctl.assert_any_call(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+
+
+# ---------------------------------------------------------------------------
+# Scenario 6: PR_SET_DUMPABLE=0 applied via prctl (T-096 attempt2, FR-411)
+# ---------------------------------------------------------------------------
+
+class TestPrSetDumpable:
+    """preexec_fn must call prctl(PR_SET_DUMPABLE=4, 0, 0, 0, 0) on Linux."""
+
+    def setup_method(self):
+        _reset()
+
+    @pytest.mark.skipif(not hasattr(os, "setuid"), reason="POSIX only")
+    def test_prctl_set_dumpable_zero_called_on_linux(self, tmp_path, monkeypatch):
+        """On Linux, prctl(PR_SET_DUMPABLE, 0) must be called in preexec_fn."""
+        monkeypatch.setenv("PATH", "/usr/bin:/bin")
+        spawn_proxy.configure(
+            uid=1000,
+            gid=1000,
+            cwd=str(tmp_path),
+            env_allowlist=["PATH"],
+        )
+
+        captured: dict = {}
+
+        def fake_run(args, **kwargs):
+            captured.update(kwargs)
+            return subprocess.CompletedProcess(args, 0)
+
+        mock_prctl = MagicMock(return_value=0)
+        mock_libc = MagicMock()
+        mock_libc.prctl = mock_prctl
+
+        with (
+            patch("spawn_proxy.subprocess.run", fake_run),
+            patch("spawn_proxy.os.setgroups", MagicMock()),
+            patch("spawn_proxy.os.setgid", MagicMock()),
+            patch("spawn_proxy.os.setuid", MagicMock()),
+            patch("spawn_proxy.sys.platform", "linux"),
+            patch("spawn_proxy.ctypes.CDLL", return_value=mock_libc),
+        ):
+            spawn_proxy.spawn(["true"])
+            preexec = captured.get("preexec_fn")
+            assert preexec is not None
+            preexec()
+
+        PR_SET_DUMPABLE = 4
+        mock_prctl.assert_any_call(PR_SET_DUMPABLE, 0, 0, 0, 0)
+
+    @pytest.mark.skipif(not hasattr(os, "setuid"), reason="POSIX only")
+    def test_prctl_failure_raises_oserror(self, tmp_path, monkeypatch):
+        """prctl returning non-zero must raise OSError (no silent swallow)."""
+        monkeypatch.setenv("PATH", "/usr/bin:/bin")
+        spawn_proxy.configure(
+            uid=1000,
+            gid=1000,
+            cwd=str(tmp_path),
+            env_allowlist=["PATH"],
+        )
+
+        captured: dict = {}
+
+        def fake_run(args, **kwargs):
+            captured.update(kwargs)
+            return subprocess.CompletedProcess(args, 0)
+
+        mock_prctl = MagicMock(return_value=-1)
+        mock_libc = MagicMock()
+        mock_libc.prctl = mock_prctl
+
+        with (
+            patch("spawn_proxy.subprocess.run", fake_run),
+            patch("spawn_proxy.os.setgroups", MagicMock()),
+            patch("spawn_proxy.os.setgid", MagicMock()),
+            patch("spawn_proxy.os.setuid", MagicMock()),
+            patch("spawn_proxy.sys.platform", "linux"),
+            patch("spawn_proxy.ctypes.CDLL", return_value=mock_libc),
+        ):
+            spawn_proxy.spawn(["true"])
+            preexec = captured.get("preexec_fn")
+            assert preexec is not None
+            with pytest.raises(OSError):
+                preexec()
+
+
+# ---------------------------------------------------------------------------
+# Scenario 7: setresgid/setresuid used instead of setgid/setuid (T-096 attempt2)
+# ---------------------------------------------------------------------------
+
+class TestSetresDrop:
+    """preexec_fn must use setresgid/setresuid (not setgid/setuid) to seal saved-IDs."""
+
+    def setup_method(self):
+        _reset()
+
+    @pytest.mark.skipif(not hasattr(os, "setuid"), reason="POSIX only")
+    def test_setresgid_and_setresuid_called(self, tmp_path, monkeypatch):
+        """setresgid(gid,gid,gid) and setresuid(uid,uid,uid) must be called."""
+        monkeypatch.setenv("PATH", "/usr/bin:/bin")
+        spawn_proxy.configure(
+            uid=1000,
+            gid=1000,
+            cwd=str(tmp_path),
+            env_allowlist=["PATH"],
+        )
+
+        captured: dict = {}
+
+        def fake_run(args, **kwargs):
+            captured.update(kwargs)
+            return subprocess.CompletedProcess(args, 0)
+
+        mock_setresgid = MagicMock()
+        mock_setresuid = MagicMock()
+
+        # create=True allows patching on platforms where setresgid/setresuid
+        # don't exist natively (macOS). On Linux the real attrs are replaced.
+        # Also patch setgid/setuid so they don't raise if called (but we
+        # assert they are NOT called — setres* must replace them entirely).
+        with (
+            patch("spawn_proxy.subprocess.run", fake_run),
+            patch("spawn_proxy.os.setgroups", MagicMock()),
+            patch("spawn_proxy.os.setgid", MagicMock()),
+            patch("spawn_proxy.os.setuid", MagicMock()),
+            patch("spawn_proxy.os.setresgid", mock_setresgid, create=True),
+            patch("spawn_proxy.os.setresuid", mock_setresuid, create=True),
+        ):
+            spawn_proxy.spawn(["true"])
+            preexec = captured.get("preexec_fn")
+            assert preexec is not None
+            preexec()
+
+        mock_setresgid.assert_called_once_with(1000, 1000, 1000)
+        mock_setresuid.assert_called_once_with(1000, 1000, 1000)
