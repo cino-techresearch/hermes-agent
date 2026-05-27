@@ -12,6 +12,7 @@ import sys
 from typing import Any
 
 PR_SET_NO_NEW_PRIVS = 38
+PR_SET_DUMPABLE = 4
 
 _CONFIG: dict[str, Any] | None = None
 
@@ -40,17 +41,20 @@ def spawn(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
 
     def _drop_privileges() -> None:
         # Block setuid-binary privilege escalation before dropping root.
-        # Best-effort: Linux only; skip silently on macOS/other platforms.
+        # Linux only; skip on macOS/other platforms where prctl is absent.
         if sys.platform == "linux":
-            try:
-                libc = ctypes.CDLL("libc.so.6", use_errno=True)
-                libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
-            except OSError:
-                pass
-        # Drop supplementary groups before setgid/setuid (requires CAP_SETGID).
+            libc = ctypes.CDLL("libc.so.6", use_errno=True)
+            rc1 = libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+            if rc1 != 0:
+                raise OSError(ctypes.get_errno(), "prctl(PR_SET_NO_NEW_PRIVS)")
+            rc2 = libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0)
+            if rc2 != 0:
+                raise OSError(ctypes.get_errno(), "prctl(PR_SET_DUMPABLE)")
+        # Drop supplementary groups before setresgid/setresuid (requires CAP_SETGID).
+        # setresgid/setresuid seal the saved-set-ID so root cannot be restored.
         os.setgroups([gid])
-        os.setgid(gid)
-        os.setuid(uid)
+        os.setresgid(gid, gid, gid)
+        os.setresuid(uid, uid, uid)
 
     kwargs.setdefault("cwd", _CONFIG["cwd"])
     kwargs.setdefault("env", filtered_env)

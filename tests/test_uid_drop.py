@@ -56,11 +56,16 @@ class TestUidDropPreexecFn:
         mock_setgid = MagicMock()
         mock_setuid = MagicMock()
 
+        mock_setresgid = MagicMock()
+        mock_setresuid = MagicMock()
+
         with (
             patch("spawn_proxy.subprocess.run", fake_run),
             patch("spawn_proxy.os.setgroups", mock_setgroups),
             patch("spawn_proxy.os.setgid", mock_setgid),
             patch("spawn_proxy.os.setuid", mock_setuid),
+            patch("spawn_proxy.os.setresgid", mock_setresgid, create=True),
+            patch("spawn_proxy.os.setresuid", mock_setresuid, create=True),
         ):
             spawn_proxy.spawn(["true"])
             # preexec_fn is stored in kwargs; call it to simulate child exec
@@ -68,12 +73,10 @@ class TestUidDropPreexecFn:
             assert preexec is not None, "preexec_fn must be set on POSIX"
             preexec()
 
-        mock_setgid.assert_called_once_with(1000)
-        mock_setuid.assert_called_once_with(1000)
-        # gid drop must precede uid drop (setgid after setuid loses privileges)
-        assert mock_setgid.call_args_list.index(call(1000)) < (
-            mock_setgid.call_args_list + mock_setuid.call_args_list
-        ).index(call(1000)) or mock_setgid.called
+        mock_setresgid.assert_called_once_with(1000, 1000, 1000)
+        mock_setresuid.assert_called_once_with(1000, 1000, 1000)
+        # gid drop must precede uid drop (setresgid after setresuid loses privileges)
+        assert mock_setresgid.called and mock_setresuid.called
 
 
 # ---------------------------------------------------------------------------
@@ -132,16 +135,18 @@ class TestPrivilegeDropOrder:
         with (
             patch("spawn_proxy.subprocess.run", fake_run3),
             patch("spawn_proxy.os.setgroups", side_effect=lambda g: call_order2.append("setgroups")),
-            patch("spawn_proxy.os.setgid", side_effect=lambda g: call_order2.append("setgid")),
-            patch("spawn_proxy.os.setuid", side_effect=lambda u: call_order2.append("setuid")),
+            patch("spawn_proxy.os.setgid", MagicMock()),
+            patch("spawn_proxy.os.setuid", MagicMock()),
+            patch("spawn_proxy.os.setresgid", side_effect=lambda *a: call_order2.append("setresgid"), create=True),
+            patch("spawn_proxy.os.setresuid", side_effect=lambda *a: call_order2.append("setresuid"), create=True),
         ):
             spawn_proxy.spawn(["true"])
             preexec = captured2.get("preexec_fn")
             assert preexec is not None
             preexec()
 
-        assert call_order2 == ["setgroups", "setgid", "setuid"], (
-            f"Expected ['setgroups', 'setgid', 'setuid'], got {call_order2}"
+        assert call_order2 == ["setgroups", "setresgid", "setresuid"], (
+            f"Expected ['setgroups', 'setresgid', 'setresuid'], got {call_order2}"
         )
 
 
@@ -200,6 +205,8 @@ class TestSetgroupsDrop:
             patch("spawn_proxy.os.setgroups", mock_setgroups),
             patch("spawn_proxy.os.setgid", mock_setgid),
             patch("spawn_proxy.os.setuid", mock_setuid),
+            patch("spawn_proxy.os.setresgid", MagicMock(), create=True),
+            patch("spawn_proxy.os.setresuid", MagicMock(), create=True),
         ):
             spawn_proxy.spawn(["true"])
             preexec = captured.get("preexec_fn")
@@ -210,7 +217,7 @@ class TestSetgroupsDrop:
 
     @pytest.mark.skipif(not hasattr(os, "setuid"), reason="POSIX only")
     def test_setgroups_called_before_setgid(self, tmp_path, monkeypatch):
-        """setgroups must precede setgid (both require CAP_SETGID)."""
+        """setgroups must precede setresgid (both require CAP_SETGID)."""
         monkeypatch.setenv("PATH", "/usr/bin:/bin")
         spawn_proxy.configure(
             uid=500,
@@ -229,8 +236,10 @@ class TestSetgroupsDrop:
         with (
             patch("spawn_proxy.subprocess.run", fake_run),
             patch("spawn_proxy.os.setgroups", side_effect=lambda g: call_order.append("setgroups")),
-            patch("spawn_proxy.os.setgid", side_effect=lambda g: call_order.append("setgid")),
-            patch("spawn_proxy.os.setuid", side_effect=lambda u: call_order.append("setuid")),
+            patch("spawn_proxy.os.setgid", MagicMock()),
+            patch("spawn_proxy.os.setuid", MagicMock()),
+            patch("spawn_proxy.os.setresgid", side_effect=lambda *a: call_order.append("setresgid"), create=True),
+            patch("spawn_proxy.os.setresuid", side_effect=lambda *a: call_order.append("setresuid"), create=True),
         ):
             spawn_proxy.spawn(["true"])
             preexec = captured.get("preexec_fn")
@@ -238,8 +247,8 @@ class TestSetgroupsDrop:
             preexec()
 
         assert call_order[0] == "setgroups", f"Expected setgroups first, got {call_order}"
-        assert call_order.index("setgroups") < call_order.index("setgid")
-        assert call_order.index("setgid") < call_order.index("setuid")
+        assert call_order.index("setgroups") < call_order.index("setresgid")
+        assert call_order.index("setresgid") < call_order.index("setresuid")
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +290,8 @@ class TestNoNewPrivs:
             patch("spawn_proxy.os.setgroups", MagicMock()),
             patch("spawn_proxy.os.setgid", MagicMock()),
             patch("spawn_proxy.os.setuid", MagicMock()),
+            patch("spawn_proxy.os.setresgid", MagicMock(), create=True),
+            patch("spawn_proxy.os.setresuid", MagicMock(), create=True),
             patch("spawn_proxy.sys.platform", "linux"),
             patch("spawn_proxy.ctypes.CDLL", return_value=mock_libc),
         ):
@@ -329,6 +340,8 @@ class TestPrSetDumpable:
             patch("spawn_proxy.os.setgroups", MagicMock()),
             patch("spawn_proxy.os.setgid", MagicMock()),
             patch("spawn_proxy.os.setuid", MagicMock()),
+            patch("spawn_proxy.os.setresgid", MagicMock(), create=True),
+            patch("spawn_proxy.os.setresuid", MagicMock(), create=True),
             patch("spawn_proxy.sys.platform", "linux"),
             patch("spawn_proxy.ctypes.CDLL", return_value=mock_libc),
         ):
@@ -366,6 +379,8 @@ class TestPrSetDumpable:
             patch("spawn_proxy.os.setgroups", MagicMock()),
             patch("spawn_proxy.os.setgid", MagicMock()),
             patch("spawn_proxy.os.setuid", MagicMock()),
+            patch("spawn_proxy.os.setresgid", MagicMock(), create=True),
+            patch("spawn_proxy.os.setresuid", MagicMock(), create=True),
             patch("spawn_proxy.sys.platform", "linux"),
             patch("spawn_proxy.ctypes.CDLL", return_value=mock_libc),
         ):
