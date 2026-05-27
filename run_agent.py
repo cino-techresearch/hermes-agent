@@ -13865,6 +13865,46 @@ def main(
     print("\n👋 Agent execution completed!")
 
 
+class HermesRunner:
+    """Thin wrapper around AIAgent for HermesRunner.run_for_user.
+
+    Added by T-050/T-051 (FR-404): provides a stable public interface for
+    backend callers, wiring progress_cb to AIAgent.tool_progress_callback so
+    every tool-call step fires progress_cb(event, name, preview, args).
+    """
+
+    def run_for_user(
+        self,
+        user_id: str,
+        prompt: str,
+        history: list = None,
+        progress_cb: callable = None,
+        **kwargs,
+    ) -> dict:
+        """Run a conversation as user_id, calling progress_cb on each tool step.
+
+        Args:
+            user_id: Tenant / user identifier forwarded to AIAgent.
+            prompt: User message to process.
+            history: Previous conversation messages (optional).
+            progress_cb: Called with (event, name, preview, args) for each
+                tool-call step.  Mapped to AIAgent.tool_progress_callback.
+            **kwargs: Forwarded verbatim to AIAgent.__init__.
+
+        Returns:
+            AIAgent.run_conversation result dict.
+        """
+        agent = AIAgent(
+            user_id=user_id,
+            tool_progress_callback=progress_cb,
+            **kwargs,
+        )
+        return agent.run_conversation(
+            user_message=prompt,
+            conversation_history=history or [],
+        )
+
+
 if __name__ == "__main__":
     import fire
     fire.Fire(main)
