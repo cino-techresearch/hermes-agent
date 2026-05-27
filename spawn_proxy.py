@@ -5,9 +5,13 @@ Called once via configure() at HermesRunner boot.
 """
 from __future__ import annotations
 
+import ctypes
 import os
 import subprocess
+import sys
 from typing import Any
+
+PR_SET_NO_NEW_PRIVS = 38
 
 _CONFIG: dict[str, Any] | None = None
 
@@ -35,6 +39,16 @@ def spawn(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
     gid = _CONFIG["gid"]
 
     def _drop_privileges() -> None:
+        # Block setuid-binary privilege escalation before dropping root.
+        # Best-effort: Linux only; skip silently on macOS/other platforms.
+        if sys.platform == "linux":
+            try:
+                libc = ctypes.CDLL("libc.so.6", use_errno=True)
+                libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+            except OSError:
+                pass
+        # Drop supplementary groups before setgid/setuid (requires CAP_SETGID).
+        os.setgroups([gid])
         os.setgid(gid)
         os.setuid(uid)
 

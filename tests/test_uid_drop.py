@@ -52,11 +52,13 @@ class TestUidDropPreexecFn:
             captured.update(kwargs)
             return subprocess.CompletedProcess(args, 0)
 
+        mock_setgroups = MagicMock()
         mock_setgid = MagicMock()
         mock_setuid = MagicMock()
 
         with (
             patch("spawn_proxy.subprocess.run", fake_run),
+            patch("spawn_proxy.os.setgroups", mock_setgroups),
             patch("spawn_proxy.os.setgid", mock_setgid),
             patch("spawn_proxy.os.setuid", mock_setuid),
         ):
@@ -129,6 +131,7 @@ class TestPrivilegeDropOrder:
         call_order2: list[str] = []
         with (
             patch("spawn_proxy.subprocess.run", fake_run3),
+            patch("spawn_proxy.os.setgroups", side_effect=lambda g: call_order2.append("setgroups")),
             patch("spawn_proxy.os.setgid", side_effect=lambda g: call_order2.append("setgid")),
             patch("spawn_proxy.os.setuid", side_effect=lambda u: call_order2.append("setuid")),
         ):
@@ -137,8 +140,8 @@ class TestPrivilegeDropOrder:
             assert preexec is not None
             preexec()
 
-        assert call_order2 == ["setgid", "setuid"], (
-            f"Expected ['setgid', 'setuid'], got {call_order2}"
+        assert call_order2 == ["setgroups", "setgid", "setuid"], (
+            f"Expected ['setgroups', 'setgid', 'setuid'], got {call_order2}"
         )
 
 
