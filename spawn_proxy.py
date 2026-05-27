@@ -22,8 +22,8 @@ def configure(*, uid: int, gid: int, cwd: str, env_allowlist: list[str]) -> None
     _CONFIG = {"uid": uid, "gid": gid, "cwd": cwd, "env_allowlist": env_allowlist}
 
 
-def spawn(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
-    """Run args as a subprocess with UID drop, cwd restriction, env allowlist."""
+def _build_spawn_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Apply UID drop, cwd restriction, env allowlist to kwargs."""
     if _CONFIG is None:
         raise RuntimeError("spawn_proxy.configure() must be called first")
 
@@ -44,4 +44,14 @@ def spawn(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
     if hasattr(os, "setuid"):
         kwargs.setdefault("preexec_fn", _drop_privileges)
 
-    return subprocess.run(args, **kwargs)
+    return kwargs
+
+
+def spawn(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+    """Run args as a subprocess with UID drop, cwd restriction, env allowlist."""
+    return subprocess.run(args, **_build_spawn_kwargs(kwargs))
+
+
+def spawn_popen(args: list[str], **kwargs: Any) -> subprocess.Popen:
+    """Open args as a long-running subprocess with UID drop, cwd restriction, env allowlist."""
+    return subprocess.Popen(args, **_build_spawn_kwargs(kwargs))
