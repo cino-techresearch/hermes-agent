@@ -1,0 +1,96 @@
+name: Hermes Fork Verify
+
+# fork(cino-techresearch/hermes-agent) 전용 검증 워크플로.
+# upstream tests.yml/docker-publish.yml 은:
+#   - docker-publish: `if: github.repository == 'NousResearch/hermes-agent'` 로 fork 에선 skip
+#   - 둘 다 main 대상 push/PR 에만 트리거
+# 이라 통합 브랜치(multitenant-runtime-patches-v2) 검증이 안 된다.
+# 이 워크플로는 그 공백을 메운다: 통합 브랜치 push 에서 직접 돌고, repo 게이트 없음,
+# 이미지는 --load 만(push 없음 — NFR-004 준수).
+on:
+  push:
+    branches:
+      - 'multitenant-runtime-patches-v2'
+      - 'multitenant-runtime-patches-v*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # NFR-005(a)/DOD-001: pytest — spawn_proxy 코어 + 회귀. tests.yml 셋업 미러(py3.11/uv).
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+      - name: Install dependencies
+        run: |
+          uv venv .venv --python 3.11
+          source .venv/bin/activate
+          uv pip install -e ".[all,dev]"
+      - name: Track1 spawn_proxy core tests (UID drop primitive)
+        run: |
+          source .venv/bin/activate
+          python -m pytest tests/test_spawn_proxy.py tests/test_uid_drop.py -v --tb=short
+        env:
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""
+      - name: Full regression (mirror upstream tests.yml; non-blocking until reimpl lands)
+        continue-on-error: true
+        run: |
+          source .venv/bin/activate
+          python -m pytest tests/ -q --ignore=tests/integration --ignore=tests/e2e --tb=short -n auto
+        env:
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""
+
+  # NFR-001/NFR-006/DOD-002: amd64 빌드(--load, push 없음) + 컨테이너 smoke(/opt/data, entrypoint).
+  amd64-build-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
+      - name: Build amd64 image (load only, NO push)
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7.1.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: hermes-agent:fork-verify
+          cache-from: type=gha,scope=fork-verify-amd64
+          cache-to: type=gha,mode=max,scope=fork-verify-amd64
+      - name: Smoke — entrypoint --help / dashboard --help (/opt/data mount)
+        uses: ./.github/actions/hermes-smoke-test
+        with:
+          image: hermes-agent:fork-verify
+      - name: Smoke — HERMES_UID non-root remap (NFR-006)
+        run: |
+          mkdir -p /tmp/hermes-uid && sudo chown -R 12345:12345 /tmp/hermes-uid
+          # HERMES_UID 로 remap 후 실효 uid 가 root(0) 가 아니어야 한다.
+          out="$(docker run --rm -e HERMES_UID=12345 \
+            -v /tmp/hermes-uid:/opt/data \
+            --entrypoint /opt/hermes/docker/entrypoint.sh \
+            hermes-agent:fork-verify sh -c 'id -u' 2>/dev/null | tail -1 || true)"
+          echo "container effective uid: '$out'"
+          if [ "$out" = "0" ] || [ -z "$out" ]; then
+            echo "FAIL: HERMES_UID remap 결과 uid=$out (non-root 12345 기대) — entrypoint 런타임 계약(T-030) 재구현 필요"
+            exit 1
+          fi
+          [ "$out" = "12345" ] && echo "OK: 실효 uid=12345 (non-root, HERMES_UID 적용)" || echo "WARN: uid=$out (non-root이나 12345 아님 — entrypoint 계약 점검)"
