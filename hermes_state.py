@@ -31,7 +31,23 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-DEFAULT_DB_PATH = get_hermes_home() / "state.db"
+# Multitenant (model 2 / library-import): a module-level constant frozen at
+# import time leaks across tenants when HERMES_HOME changes per request via the
+# context-local override (hermes_constants._HERMES_HOME_OVERRIDE). PEP 562
+# __getattr__ resolves DEFAULT_DB_PATH lazily on each access so it tracks the
+# active per-task home. Internal callers use get_hermes_home() directly; external
+# `from hermes_state import DEFAULT_DB_PATH` bindings must be converted to
+# attribute access (hermes_state.DEFAULT_DB_PATH) to pick up the lazy value.
+_LAZY_ATTRS: dict[str, Callable[[], Any]] = {
+    "DEFAULT_DB_PATH": lambda: get_hermes_home() / "state.db",
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY_ATTRS:
+        return _LAZY_ATTRS[name]()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 SCHEMA_VERSION = 14
 
@@ -375,7 +391,9 @@ class SessionDB:
     _CHECKPOINT_EVERY_N_WRITES = 50
 
     def __init__(self, db_path: Path = None):
-        self.db_path = db_path or DEFAULT_DB_PATH
+        # Resolve the default lazily at instantiation so a per-task HERMES_HOME
+        # override (context-local) is honored instead of the import-time path.
+        self.db_path = db_path or (get_hermes_home() / "state.db")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._lock = threading.Lock()

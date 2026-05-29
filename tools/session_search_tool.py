@@ -453,8 +453,10 @@ def session_search(
 def check_session_search_requirements() -> bool:
     """Requires the SQLite state database."""
     try:
-        from hermes_state import DEFAULT_DB_PATH
-        return DEFAULT_DB_PATH.parent.exists()
+        # Attribute access (not `from ... import`) so PEP 562 __getattr__ resolves
+        # DEFAULT_DB_PATH lazily against the active per-task HERMES_HOME.
+        import hermes_state
+        return hermes_state.DEFAULT_DB_PATH.parent.exists()
     except ImportError:
         return False
 

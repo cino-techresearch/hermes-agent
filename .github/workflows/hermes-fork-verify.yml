@@ -39,10 +39,10 @@ jobs:
           uv venv .venv --python 3.11
           source .venv/bin/activate
           uv pip install -e ".[all,dev]"
-      - name: Track1 spawn_proxy core tests (UID drop primitive)
+      - name: Core tests — spawn_proxy UID-drop + multitenant cross-tenant leak
         run: |
           source .venv/bin/activate
-          python -m pytest tests/test_spawn_proxy.py tests/test_uid_drop.py -v --tb=short
+          python -m pytest tests/test_spawn_proxy.py tests/test_uid_drop.py tests/test_cross_tenant_leak.py -v --tb=short
         env:
           OPENROUTER_API_KEY: ""
           OPENAI_API_KEY: ""
