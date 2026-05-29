@@ -52,3 +52,63 @@ def test_from_import_binding_is_not_used_in_repo():
     src = inspect.getsource(session_search_tool.check_session_search_requirements)
     assert "from hermes_state import DEFAULT_DB_PATH" not in src
     assert "hermes_state.DEFAULT_DB_PATH" in src
+
+
+def test_openrouter_client_isolated_per_tenant(tmp_path, monkeypatch):
+    """T-012: openrouter get_async_client must build/cache per tenant home, not a
+    single process-global client shared across tenants."""
+    import tools.openrouter_client as orc
+
+    orc._build_async_client.cache_clear()
+    counter = {"n": 0}
+
+    def fake_resolve(provider, async_mode=False):
+        counter["n"] += 1
+        return object(), "model-x"
+
+    monkeypatch.setattr("agent.auxiliary_client.resolve_provider_client", fake_resolve)
+
+    a = tmp_path / "ta"
+    b = tmp_path / "tb"
+
+    tok = hermes_constants.set_hermes_home_override(str(a))
+    try:
+        c_a1 = orc.get_async_client()
+        c_a2 = orc.get_async_client()
+    finally:
+        hermes_constants.reset_hermes_home_override(tok)
+
+    tok = hermes_constants.set_hermes_home_override(str(b))
+    try:
+        c_b = orc.get_async_client()
+    finally:
+        hermes_constants.reset_hermes_home_override(tok)
+
+    assert c_a1 is c_a2          # same tenant → cached
+    assert c_a1 is not c_b       # different tenant → isolated
+    assert counter["n"] == 2     # built exactly once per tenant
+    orc._build_async_client.cache_clear()
+
+
+def test_auxiliary_client_cache_key_includes_tenant(tmp_path):
+    """T-012: provider client cache key must include the active tenant home so
+    clients are never shared across tenants in one process."""
+    from agent.auxiliary_client import _client_cache_key
+
+    a = tmp_path / "ta"
+    b = tmp_path / "tb"
+
+    tok = hermes_constants.set_hermes_home_override(str(a))
+    try:
+        ka = _client_cache_key("openrouter", async_mode=True)
+    finally:
+        hermes_constants.reset_hermes_home_override(tok)
+
+    tok = hermes_constants.set_hermes_home_override(str(b))
+    try:
+        kb = _client_cache_key("openrouter", async_mode=True)
+    finally:
+        hermes_constants.reset_hermes_home_override(tok)
+
+    assert ka != kb
+    assert ka[0] == str(a) and kb[0] == str(b)
