@@ -51,6 +51,16 @@ from spawn_proxy import spawn
 
 logger = logging.getLogger(__name__)
 
+_SESSION_SUBPROCESS_ENV_VARS = (
+    "HERMES_SESSION_PLATFORM",
+    "HERMES_SESSION_CHAT_ID",
+    "HERMES_SESSION_CHAT_NAME",
+    "HERMES_SESSION_THREAD_ID",
+    "HERMES_SESSION_USER_ID",
+    "HERMES_SESSION_USER_NAME",
+    "HERMES_SESSION_KEY",
+)
+
 
 # ---------------------------------------------------------------------------
 # Global interrupt event: set by the agent when a user interrupt arrives.
@@ -1065,6 +1075,26 @@ def _get_modal_backend_state(modal_mode: object | None) -> Dict[str, Any]:
     )
 
 
+def _refresh_subprocess_session_env(env: object) -> None:
+    """Copy current gateway session contextvars into this command's subprocess env."""
+    env_vars = getattr(env, "env", None)
+    if not isinstance(env_vars, dict):
+        return
+
+    for name in _SESSION_SUBPROCESS_ENV_VARS:
+        env_vars.pop(name, None)
+
+    try:
+        from gateway.session_context import get_session_env
+    except Exception:
+        return
+
+    for name in _SESSION_SUBPROCESS_ENV_VARS:
+        value = get_session_env(name, "")
+        if value:
+            env_vars[name] = str(value)
+
+
 def _create_environment(env_type: str, image: str, cwd: str, timeout: int,
                         ssh_config: dict = None, container_config: dict = None,
                         local_config: dict = None,
@@ -1840,6 +1870,8 @@ def terminal_tool(
                     "error": workdir_error,
                     "status": "blocked"
                 }, ensure_ascii=False)
+
+        _refresh_subprocess_session_env(env)
 
         # Prepare command for execution
         pty_disabled_reason = None

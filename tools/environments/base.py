@@ -26,6 +26,16 @@ from tools.interrupt import is_interrupted
 
 logger = logging.getLogger(__name__)
 
+_EPHEMERAL_SUBPROCESS_ENV_VARS = (
+    "HERMES_SESSION_PLATFORM",
+    "HERMES_SESSION_CHAT_ID",
+    "HERMES_SESSION_CHAT_NAME",
+    "HERMES_SESSION_THREAD_ID",
+    "HERMES_SESSION_USER_ID",
+    "HERMES_SESSION_USER_NAME",
+    "HERMES_SESSION_KEY",
+)
+
 # Opt-in debug tracing for the interrupt/activity/poll machinery.  Set
 # HERMES_DEBUG_INTERRUPT=1 to log loop entry/exit, periodic heartbeats, and
 # every is_interrupted() state change from _wait_for_process.  Off by default
@@ -417,6 +427,8 @@ class BaseEnvironment(ABC):
 
         # Re-dump env vars to snapshot (last-writer-wins for concurrent calls)
         if self._snapshot_ready:
+            for name in _EPHEMERAL_SUBPROCESS_ENV_VARS:
+                parts.append(f"unset {name} 2>/dev/null || true")
             parts.append(f"export -p > {self._snapshot_path} 2>/dev/null || true")
 
         # Write CWD to file (local reads this) and stdout marker (remote parses this)
@@ -786,4 +798,3 @@ class BaseEnvironment(ABC):
         from tools.terminal_tool import _transform_sudo_command
 
         return _transform_sudo_command(command)
-
