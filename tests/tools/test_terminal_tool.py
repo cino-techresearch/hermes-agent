@@ -1,4 +1,6 @@
-"""Regression tests for sudo detection and sudo password handling."""
+"""Regression tests for terminal command handling."""
+
+import json
 
 import tools.terminal_tool as terminal_tool
 
@@ -117,3 +119,71 @@ def test_validate_workdir_blocks_shell_metacharacters_in_windows_paths():
     assert terminal_tool._validate_workdir(r"C:\Users\Alice\project; rm -rf /")
     assert terminal_tool._validate_workdir(r"C:\Users\Alice\project$(whoami)")
     assert terminal_tool._validate_workdir("C:\\Users\\Alice\\project\nwhoami")
+
+
+def test_terminal_subprocess_receives_gateway_session_context(monkeypatch):
+    """Terminal-launched CLI commands need origin metadata for cron delivery."""
+    from gateway.session_context import clear_session_vars, set_session_vars
+
+    class DummyEnvironment:
+        def __init__(self) -> None:
+            self.env: dict[str, str] = {}
+
+        def execute(self, command, **kwargs):  # noqa: ANN001, ANN201
+            keys = (
+                "HERMES_SESSION_PLATFORM",
+                "HERMES_SESSION_CHAT_ID",
+                "HERMES_SESSION_CHAT_NAME",
+                "HERMES_SESSION_THREAD_ID",
+                "HERMES_SESSION_USER_ID",
+                "HERMES_SESSION_USER_NAME",
+                "HERMES_SESSION_KEY",
+            )
+            return {
+                "output": json.dumps({key: self.env.get(key) for key in keys}),
+                "returncode": 0,
+            }
+
+    dummy = DummyEnvironment()
+    config = {
+        "env_type": "local",
+        "cwd": ".",
+        "timeout": 30,
+        "lifetime_seconds": 300,
+    }
+    tokens = set_session_vars(
+        platform="telegram",
+        chat_id="-100123",
+        chat_name="Ops",
+        thread_id="456",
+        user_id="789",
+        user_name="ram",
+        session_key="telegram:-100123:456",
+    )
+    try:
+        monkeypatch.setattr(terminal_tool, "_get_env_config", lambda: config)
+        monkeypatch.setattr(terminal_tool, "_start_cleanup_thread", lambda: None)
+        monkeypatch.setattr(
+            terminal_tool,
+            "_check_all_guards",
+            lambda *_args, **_kwargs: {"approved": True},
+        )
+        monkeypatch.setitem(terminal_tool._active_environments, "default", dummy)
+        monkeypatch.setitem(terminal_tool._last_activity, "default", 0.0)
+
+        result = json.loads(terminal_tool.terminal_tool(command="hermes cron create 1m 'ping'"))
+        seen_env = json.loads(result["output"])
+
+        assert seen_env == {
+            "HERMES_SESSION_PLATFORM": "telegram",
+            "HERMES_SESSION_CHAT_ID": "-100123",
+            "HERMES_SESSION_CHAT_NAME": "Ops",
+            "HERMES_SESSION_THREAD_ID": "456",
+            "HERMES_SESSION_USER_ID": "789",
+            "HERMES_SESSION_USER_NAME": "ram",
+            "HERMES_SESSION_KEY": "telegram:-100123:456",
+        }
+    finally:
+        terminal_tool._active_environments.pop("default", None)
+        terminal_tool._last_activity.pop("default", None)
+        clear_session_vars(tokens)
