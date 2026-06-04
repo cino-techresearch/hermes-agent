@@ -341,7 +341,7 @@ class TestTermuxAudioRecorder:
         monkeypatch.setattr("tools.voice_mode._termux_microphone_command", lambda: "/data/data/com.termux/files/usr/bin/termux-microphone-record")
         monkeypatch.setattr("tools.voice_mode._termux_api_app_installed", lambda: True)
         monkeypatch.setattr("tools.voice_mode.time.strftime", lambda fmt: "20260409_120000")
-        monkeypatch.setattr("tools.voice_mode.subprocess.run", fake_run)
+        monkeypatch.setattr("tools.voice_mode.spawn", fake_run)
 
         from tools.voice_mode import TermuxAudioRecorder
         recorder = TermuxAudioRecorder()
@@ -366,7 +366,7 @@ class TestTermuxAudioRecorder:
         monkeypatch.setattr("tools.voice_mode._termux_microphone_command", lambda: "/data/data/com.termux/files/usr/bin/termux-microphone-record")
         monkeypatch.setattr("tools.voice_mode._termux_api_app_installed", lambda: True)
         monkeypatch.setattr("tools.voice_mode.time.strftime", lambda fmt: "20260409_120000")
-        monkeypatch.setattr("tools.voice_mode.subprocess.run", fake_run)
+        monkeypatch.setattr("tools.voice_mode.spawn", fake_run)
 
         from tools.voice_mode import TermuxAudioRecorder
         recorder = TermuxAudioRecorder()

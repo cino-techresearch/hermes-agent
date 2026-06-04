@@ -32,7 +32,10 @@ from urllib.parse import urlencode
 import fal_client
 
 from tools.debug_helpers import DebugSession
-from tools.managed_tool_gateway import resolve_managed_tool_gateway
+from tools.managed_tool_gateway import (
+    ManagedToolGatewayConfig,
+    resolve_managed_tool_gateway,
+)
 from tools.tool_backend_helpers import (
     fal_key_is_configured,
     managed_nous_tools_enabled,
@@ -323,7 +326,76 @@ def _resolve_managed_fal_gateway():
     or direct FAL credentials are absent."""
     if fal_key_is_configured() and not prefers_gateway("image_gen"):
         return None
+    configured_gateway_url = _configured_managed_fal_gateway_url()
+    if configured_gateway_url and _configured_fal_queue_gateway_enabled():
+        fal_queue_token = _read_configured_fal_queue_access_token()
+        if not fal_queue_token:
+            return None
+        return ManagedToolGatewayConfig(
+            vendor="fal-queue",
+            gateway_origin=configured_gateway_url,
+            nous_user_token=fal_queue_token,
+            managed_mode=True,
+        )
     return resolve_managed_tool_gateway("fal-queue")
+
+
+def _configured_managed_fal_gateway_url() -> str:
+    """Return image_gen.gateway_url from config.yaml when present.
+
+    SaaS deployments use tenant-local config instead of process-wide
+    FAL_QUEUE_GATEWAY_URL so concurrent tenants do not depend on request-scope
+    environment mutation.
+    """
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config() or {}
+        section = cfg.get("image_gen") if isinstance(cfg, dict) else None
+        if isinstance(section, dict):
+            value = section.get("gateway_url")
+            if isinstance(value, str) and value.strip():
+                return value.strip().rstrip("/")
+    except Exception:
+        pass
+    return ""
+
+
+def _configured_fal_queue_gateway_enabled() -> bool:
+    """Return True when tenant config explicitly enables only the fal queue gateway."""
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config() or {}
+        section = cfg.get("managed_tools") if isinstance(cfg, dict) else None
+        if isinstance(section, dict):
+            from utils import is_truthy_value
+
+            return is_truthy_value(section.get("fal_queue_enabled"), default=False)
+    except Exception:
+        pass
+    return False
+
+
+def _read_configured_fal_queue_access_token() -> str:
+    """Read a fal-only gateway token from auth.json."""
+    try:
+        import hermes_constants as hc
+
+        auth_path = hc.get_hermes_home() / "auth.json"
+        data = json.loads(auth_path.read_text())
+        providers = data.get("providers") if isinstance(data, dict) else None
+        if not isinstance(providers, dict):
+            return ""
+        fal_queue = providers.get("fal_queue")
+        if not isinstance(fal_queue, dict):
+            return ""
+        token = fal_queue.get("access_token")
+        if isinstance(token, str) and token.strip():
+            return token.strip()
+    except Exception:
+        pass
+    return ""
 
 
 def _normalize_fal_queue_url_format(queue_run_origin: str) -> str:

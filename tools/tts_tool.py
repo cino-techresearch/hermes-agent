@@ -54,6 +54,7 @@ from typing import Callable, Dict, Any, Optional
 from urllib.parse import urljoin
 
 from hermes_constants import display_hermes_home
+from spawn_proxy import spawn
 
 logger = logging.getLogger(__name__)
 def get_env_value(name, default=None):
@@ -531,7 +532,7 @@ def _terminate_command_tts_process_tree(proc: subprocess.Popen) -> None:
 
     if os.name == "nt":
         try:
-            subprocess.run(
+            spawn(
                 ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -1300,7 +1301,7 @@ def _generate_neutts(text: str, output_path: str, tts_config: Dict[str, Any]) ->
         ffmpeg = shutil.which("ffmpeg")
         if ffmpeg:
             conv_cmd = [ffmpeg, "-i", wav_path, "-y", "-loglevel", "error", output_path]
-            subprocess.run(conv_cmd, check=True, timeout=30)
+            spawn(conv_cmd, check=True, timeout=30)
             os.remove(wav_path)
         else:
             # No ffmpeg — just rename the WAV to the expected path
@@ -1458,7 +1459,7 @@ def _generate_piper_tts(text: str, output_path: str, tts_config: Dict[str, Any])
         ffmpeg = shutil.which("ffmpeg")
         if ffmpeg:
             conv_cmd = [ffmpeg, "-i", wav_path, "-y", "-loglevel", "error", output_path]
-            subprocess.run(conv_cmd, check=True, timeout=30)
+            spawn(conv_cmd, check=True, timeout=30)
             try:
                 os.remove(wav_path)
             except OSError:
@@ -1524,7 +1525,7 @@ def _generate_kittentts(text: str, output_path: str, tts_config: Dict[str, Any])
         ffmpeg = shutil.which("ffmpeg")
         if ffmpeg:
             conv_cmd = [ffmpeg, "-i", wav_path, "-y", "-loglevel", "error", output_path]
-            subprocess.run(conv_cmd, check=True, timeout=30)
+            spawn(conv_cmd, check=True, timeout=30)
             os.remove(wav_path)
         else:
             # No ffmpeg — rename the WAV to the expected path

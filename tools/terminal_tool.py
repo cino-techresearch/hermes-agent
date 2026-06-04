@@ -47,6 +47,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+from spawn_proxy import spawn
 
 logger = logging.getLogger(__name__)
 
@@ -2094,13 +2095,13 @@ def check_terminal_requirements() -> bool:
             if not docker:
                 logger.error("Docker executable not found in PATH or common install locations")
                 return False
-            result = subprocess.run([docker, "version"], capture_output=True, timeout=5)
+            result = spawn([docker, "version"], capture_output=True, timeout=5)
             return result.returncode == 0
 
         elif env_type == "singularity":
             executable = shutil.which("apptainer") or shutil.which("singularity")
             if executable:
-                result = subprocess.run([executable, "--version"], capture_output=True, timeout=5)
+                result = spawn([executable, "--version"], capture_output=True, timeout=5)
                 return result.returncode == 0
             return False
 

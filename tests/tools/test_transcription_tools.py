@@ -399,7 +399,7 @@ class TestTranscribeLocalCommand:
 
         monkeypatch.setattr("tools.transcription_tools.tempfile.TemporaryDirectory", fake_tempdir)
         monkeypatch.setattr("tools.transcription_tools._find_ffmpeg_binary", lambda: "/opt/homebrew/bin/ffmpeg")
-        monkeypatch.setattr("tools.transcription_tools.subprocess.run", fake_run)
+        monkeypatch.setattr("tools.transcription_tools.spawn", fake_run)
 
         from tools.transcription_tools import _transcribe_local_command
 

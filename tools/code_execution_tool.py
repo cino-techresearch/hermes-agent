@@ -44,6 +44,8 @@ import threading
 import time
 import uuid
 
+from spawn_proxy import spawn, spawn_popen
+
 _IS_WINDOWS = platform.system() == "Windows"
 from typing import Any, Dict, List, Optional
 
@@ -1091,7 +1093,7 @@ def execute_code(
         _child_cwd = _resolve_child_cwd(_mode, tmpdir)
         _script_path = os.path.join(tmpdir, "script.py")
 
-        proc = subprocess.Popen(
+        proc = spawn_popen(
             [_child_python, _script_path],
             cwd=_child_cwd,
             env=child_env,
@@ -1403,7 +1405,7 @@ def _is_usable_python(python_path: str) -> bool:
     Cached so we don't fork a subprocess on every execute_code call.
     """
     try:
-        result = subprocess.run(
+        result = spawn(
             [python_path, "-c",
              "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)"],
             timeout=5,
