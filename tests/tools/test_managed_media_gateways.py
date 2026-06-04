@@ -201,6 +201,46 @@ def test_managed_fal_submit_uses_gateway_origin_and_nous_token(monkeypatch):
     assert captured["sync_client_inits"] == 1
 
 
+def test_managed_fal_submit_uses_tenant_config_without_global_managed_tools(
+    monkeypatch, tmp_path
+):
+    captured = {}
+    _install_fake_tools_package()
+    _install_fake_fal_client(captured)
+    monkeypatch.delenv("FAL_KEY", raising=False)
+    monkeypatch.delenv("FAL_QUEUE_GATEWAY_URL", raising=False)
+    monkeypatch.delenv("TOOL_GATEWAY_USER_TOKEN", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr("hermes_cli.auth.get_nous_auth_status", lambda: {"logged_in": False})
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {
+            "managed_tools": {"fal_queue_enabled": True},
+            "image_gen": {
+                "gateway_url": "http://backend:8000/internal/fal-queue",
+                "use_gateway": True,
+            },
+        },
+    )
+    (tmp_path / "auth.json").write_text(
+        '{"providers":{"nous":{"access_token":"real-nous-token"},"fal_queue":{"access_token":"tenant-fal-token"}}}'
+    )
+
+    image_generation_tool = _load_tool_module(
+        "tools.image_generation_tool",
+        "image_generation_tool.py",
+    )
+
+    image_generation_tool._submit_fal_request(
+        "fal-ai/flux-2-pro",
+        {"prompt": "test prompt", "num_images": 1},
+    )
+
+    assert captured["submit_via"] == "managed_client"
+    assert captured["client_key"] == "tenant-fal-token"
+    assert captured["submit_url"] == "http://backend:8000/internal/fal-queue/fal-ai/flux-2-pro"
+
+
 def test_managed_fal_submit_reuses_cached_sync_client(monkeypatch):
     captured = {}
     _install_fake_tools_package()
