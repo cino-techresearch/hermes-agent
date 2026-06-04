@@ -316,6 +316,8 @@ UPSCALER_NUM_INFERENCE_STEPS = 18
 _debug = DebugSession("image_tools", env_var="IMAGE_TOOLS_DEBUG")
 _managed_fal_client_cache: dict = {}  # key: (str(hermes_home), gateway_origin, token) → client
 _managed_fal_client_lock = threading.Lock()
+_direct_fal_client_cache: dict = {}  # key: (str(hermes_home), fal_key) → fal_client.SyncClient
+_direct_fal_client_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -509,11 +511,57 @@ def _get_managed_fal_client(managed_gateway):
         return client
 
 
+def _resolve_direct_fal_key() -> Optional[str]:
+    """Resolve the direct FAL key, honoring per-tenant ``.env`` isolation.
+
+    Consults ``os.environ`` first, then ``get_hermes_home()/.env`` via
+    ``hermes_cli.config.get_env_value`` (ContextVar-routed, so each in-process
+    tenant resolves its own ``.env``). Mirrors ``fal_key_is_configured()``'s
+    resolution so the submit path agrees with the configured-check. Returns the
+    stripped key, or ``None`` when no key is set anywhere.
+    """
+    value = os.getenv("FAL_KEY")
+    if value is None:
+        try:
+            from hermes_cli.config import get_env_value
+
+            value = get_env_value("FAL_KEY")
+        except Exception:
+            value = None
+    value = (value or "").strip()
+    return value or None
+
+
+def _get_direct_fal_client(fal_key: str):
+    """Return a tenant-keyed direct FAL ``SyncClient``, creating one if needed.
+
+    Keyed by ``(str(hermes_home), fal_key)`` so each in-process tenant gets an
+    isolated ``httpx.Client`` bound to its own credentials, avoiding the
+    process-global ``os.environ["FAL_KEY"]`` lookup inside ``fal_client.submit``
+    that would otherwise leak keys across concurrent tenant runs.
+    """
+    import hermes_constants as hc
+
+    cache_key = (str(hc.get_hermes_home()), fal_key)
+    with _direct_fal_client_lock:
+        client = _direct_fal_client_cache.get(cache_key)
+        if client is None:
+            client = fal_client.SyncClient(key=fal_key)
+            _direct_fal_client_cache[cache_key] = client
+        return client
+
+
 def _submit_fal_request(model: str, arguments: Dict[str, Any]):
     """Submit a FAL request using direct credentials or the managed queue gateway."""
     request_headers = {"x-idempotency-key": str(uuid.uuid4())}
     managed_gateway = _resolve_managed_fal_gateway()
     if managed_gateway is None:
+        fal_key = _resolve_direct_fal_key()
+        if fal_key is not None:
+            client = _get_direct_fal_client(fal_key)
+            return client.submit(model, arguments=arguments, headers=request_headers)
+        # No key resolvable anywhere — preserve the library's own credential
+        # resolution and error surface for the single-user/CLI path.
         return fal_client.submit(model, arguments=arguments, headers=request_headers)
 
     managed_client = _get_managed_fal_client(managed_gateway)
